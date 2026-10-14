@@ -8,8 +8,13 @@
 //! Разные модели хранения ложатся на одну границу:
 //! - Claude Code — append-JSONL, дочитывание хвоста по байтовому офсету ([`claude`])
 //! - OpenCode — иммутабельные per-message JSON + части в соседних файлах ([`opencode`])
+//! - Codex — append-JSONL rollout'ы, usage на каждый API-вызов ([`codex`])
+//! - Hermes Agent — SQLite `state.db` с агрегатами usage по сессии/модели ([`hermes`])
+//! - proxy — нативный JSONL `quickai proxy` для любых OpenAI/Anthropic-совместимых агентов ([`proxy`])
 
 pub mod claude;
+pub mod codex;
+pub mod hermes;
 pub mod opencode;
 pub mod proxy;
 
@@ -80,14 +85,35 @@ pub trait DataSource {
     /// Дочитать файл с офсета `from`, вернуть нормализованные события.
     /// `seed_prompt` — последний promptId предыдущего дочитывания (протяжка Claude).
     fn read_file(&self, path: &Path, from: u64, seed_prompt: Option<String>) -> Result<FileBatch>;
+    /// Файл-снимок (БД с мутирующими агрегатами): перечитывается при каждом index, его
+    /// прежние turn'ы удаляются. Контракт: `ext_id` turn'а начинается с `"<путь файла>|"`.
+    fn snapshot(&self) -> bool {
+        false
+    }
+    /// Глубина обхода `root` (Hermes: не лезть в чекаут `hermes-agent/`).
+    fn max_depth(&self) -> usize {
+        usize::MAX
+    }
 }
 
-/// Резолв источника по имени. Новые адаптеры добавляются сюда.
-pub fn resolve(name: &str) -> Result<Box<dyn DataSource>> {
+/// Все известные источники — порядок для `index --source all`.
+pub const ALL: &[&str] = &["claude", "codex", "opencode", "hermes", "proxy"];
+
+/// Резолв источника по имени. `root` переопределяет каталог данных (зеркало с VPS,
+/// нестандартный HOME). Новые адаптеры добавляются сюда и в [`ALL`].
+pub fn resolve(name: &str, root: Option<PathBuf>) -> Result<Box<dyn DataSource>> {
     match name {
-        "claude" => Ok(Box::new(claude::ClaudeSource)),
-        "opencode" => Ok(Box::new(opencode::OpenCodeSource::new())),
-        "proxy" => Ok(Box::new(proxy::ProxySource)),
-        other => anyhow::bail!("неизвестный источник: {other} (доступно: claude, opencode, proxy)"),
+        "claude" => Ok(Box::new(claude::ClaudeSource::new(root))),
+        "codex" => Ok(Box::new(codex::CodexSource::new(root))),
+        "opencode" => Ok(Box::new(opencode::OpenCodeSource::new(root))),
+        "hermes" => Ok(Box::new(hermes::HermesSource::new(root))),
+        "proxy" => Ok(Box::new(proxy::ProxySource::new(root))),
+        other => anyhow::bail!("неизвестный источник: {other} (доступно: {}, all)", ALL.join(", ")),
     }
+}
+
+/// `$HOME/<rel>` — дефолтные корни источников.
+pub fn home_join(rel: &str) -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    PathBuf::from(home).join(rel)
 }

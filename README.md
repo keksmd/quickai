@@ -126,7 +126,7 @@ quickai — index summary
 
 | Command | What it shows |
 |---|---|
-| `quickai index [--rebuild]` | Build / refresh the index (incremental) |
+| `quickai index [--rebuild] [--source S] [--root DIR]` | Build / refresh the index (incremental). `S` = `claude` (default) \| `codex` \| `opencode` \| `hermes` \| `proxy` \| `all` |
 | `quickai stats` | Overall summary — tokens, subagents, API-equivalent |
 | `quickai tasks [--by time\|tokens\|cost] [--project X]` | Your prompts, broken down |
 | `quickai usage` | One-screen report in the terminal (pager) |
@@ -168,8 +168,21 @@ filter, so "profile this project" just works. Tools: `quickai_stats`, `quickai_t
   there are no per-token charges. It's a volume/ROI signal.
 - **No "% of subscription capacity"** — Anthropic doesn't publish a fixed token cap
   (limits are windowed and metered opaquely), so any such % would be made up.
-- **Claude Code only** for now. The core (schema, queries, report) is source-agnostic —
-  only the parse layer is Claude-specific, so other CLIs could be added via adapters.
+- **Sources.** The core (schema, queries, report) is source-agnostic; each agent is an
+  adapter in `src/source/`:
+
+  | Source | Reads | Granularity |
+  |---|---|---|
+  | `claude` | `~/.claude/projects/**/*.jsonl` | per API call |
+  | `codex` | `$CODEX_HOME` or `~/.codex` — `sessions/**/rollout-*.jsonl`, `archived_sessions/` | per API call; sub-agents roll up into the parent task |
+  | `opencode` | `$XDG_DATA_HOME/opencode/storage` | per message |
+  | `hermes` | `$HERMES_HOME` or `~/.hermes` — `state.db`, `profiles/*/state.db` (read-only) | per session × model (Hermes stores aggregates only); re-read on every index |
+  | `proxy` | `~/.quickai/proxy/*.jsonl` from `quickai proxy` | per API call — for any other OpenAI/Anthropic-compatible agent (aider, Cline, …) |
+
+- **Agents on a VPS.** Mirror the agent's data dir and point `--root` at it, e.g.
+  `rsync -a vps:.codex/ ~/mirrors/vps-codex/ && quickai index --source codex --root ~/mirrors/vps-codex`
+  (for Hermes copy `state.db` together with `state.db-wal`). Or run the quickai binary on the VPS itself.
+  Step-by-step for Hermes on a VM: [docs/hermes-vm.md](docs/hermes-vm.md).
 
 Architecture & data model: [ARCHITECTURE.md](ARCHITECTURE.md).
 

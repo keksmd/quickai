@@ -21,8 +21,13 @@ pub fn db_path() -> std::path::PathBuf {
     std::path::PathBuf::from(home).join(".claude/quickai.db")
 }
 
+/// Открыть БД, создав её каталог (на чистой машине без Claude Code `~/.claude` нет).
 pub fn open_db() -> Result<Connection> {
-    let conn = Connection::open(db_path())?;
+    let path = db_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let conn = Connection::open(path)?;
     schema::init(&conn)?;
     Ok(conn)
 }
@@ -44,8 +49,8 @@ pub fn run(conn: &mut Connection, rebuild: bool, source: &dyn DataSource) -> Res
         conn.execute("DELETE FROM sessions WHERE source=?1", [src])?;
         conn.execute("DELETE FROM tool_calls WHERE source=?1", [src])?;
         conn.execute(
-            "DELETE FROM files WHERE path LIKE ?1",
-            [format!("{}%", root.to_string_lossy())],
+            "DELETE FROM files WHERE source=?1 OR path LIKE ?2",
+            [src.to_string(), format!("{}%", root.to_string_lossy())],
         )?;
         // agent_runs/tasks пересобираются из turns в aggregate_tasks; aux-таблицы идемпотентны.
     }
@@ -53,7 +58,7 @@ pub fn run(conn: &mut Connection, rebuild: bool, source: &dyn DataSource) -> Res
     let mut stats = IndexStats { files_scanned: 0, files_indexed: 0, turns_added: 0 };
 
     let tx = conn.transaction()?;
-    for entry in WalkDir::new(&root).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(&root).max_depth(source.max_depth()).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
         if !path.is_file() || !source.owns(path) {
             continue;
@@ -78,8 +83,15 @@ pub fn run(conn: &mut Connection, rebuild: bool, source: &dyn DataSource) -> Res
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap_or((0, None));
-        if prev_read as u64 >= size {
+        if prev_read as u64 >= size && !source.snapshot() {
             continue; // не менялся — пропуск
+        }
+        if source.snapshot() {
+            let key = format!("{}|", path.to_string_lossy());
+            tx.execute(
+                "DELETE FROM turns WHERE source=?1 AND substr(ext_id,1,length(?2))=?2",
+                rusqlite::params![src, key],
+            )?;
         }
 
         let batch = source.read_file(path, prev_read as u64, seed_prompt)?;
@@ -88,14 +100,15 @@ pub fn run(conn: &mut Connection, rebuild: bool, source: &dyn DataSource) -> Res
         stats.files_indexed += 1;
 
         tx.execute(
-            "INSERT OR REPLACE INTO files(path,mtime,size,bytes_read,last_indexed,last_prompt_id)
-             VALUES(?1,?2,?3,?4,strftime('%s','now'),?5)",
+            "INSERT OR REPLACE INTO files(path,mtime,size,bytes_read,last_indexed,last_prompt_id,source)
+             VALUES(?1,?2,?3,?4,strftime('%s','now'),?5,?6)",
             rusqlite::params![
                 path.to_string_lossy(),
                 mtime,
                 size as i64,
                 batch.bytes as i64,
-                batch.last_prompt
+                batch.last_prompt,
+                src
             ],
         )?;
     }

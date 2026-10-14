@@ -28,20 +28,23 @@ struct ProxyState {
     upstream: String,
     client: reqwest::Client,
     sink: PathBuf,
+    /// Тег харнесса (`--tag`) — пишется в поле `agent`, адаптер кладёт его в project.
+    tag: Option<String>,
 }
 
 /// Поднять прокси (блокирующе). upstream — базовый URL провайдера.
-pub fn serve(port: u16, upstream: String) -> Result<()> {
+pub fn serve(port: u16, upstream: String, tag: Option<String>) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async move { serve_async(port, upstream).await })
+    rt.block_on(async move { serve_async(port, upstream, tag).await })
 }
 
-async fn serve_async(port: u16, upstream: String) -> Result<()> {
+async fn serve_async(port: u16, upstream: String, tag: Option<String>) -> Result<()> {
     let sink = sink_dir()?;
     let state = Arc::new(ProxyState {
         upstream: upstream.trim_end_matches('/').to_string(),
         client: reqwest::Client::builder().build()?,
         sink,
+        tag,
     });
 
     let app = Router::new().fallback(any(proxy)).with_state(state.clone());
@@ -154,6 +157,7 @@ async fn proxy_inner(
 
     // Tee-стрим: каждый чанк уходит клиенту немедленно + копится для разбора.
     let sink = st.sink.clone();
+    let tag = st.tag.clone();
     let mut acc: Vec<u8> = Vec::new();
     let mut up_stream = up.bytes_stream();
     let tee = async_stream::stream! {
@@ -172,7 +176,7 @@ async fn proxy_inner(
         // Поток закончился — best-effort извлечение (клиент уже всё получил).
         let latency_ms = start.elapsed().as_millis() as i64;
         if let Some(rec) = extract_usage(&acc, is_sse, &model, session.as_deref(), latency_ms) {
-            let _ = write_record(&sink, &rec);
+            let _ = write_record(&sink, &rec, tag.as_deref());
         }
     };
 
@@ -302,7 +306,7 @@ fn extract_usage(
     })
 }
 
-fn write_record(sink: &PathBuf, r: &Record) -> Result<()> {
+fn write_record(sink: &PathBuf, r: &Record, agent: Option<&str>) -> Result<()> {
     let day = chrono::Local::now().format("%Y-%m-%d");
     let path = sink.join(format!("{day}.jsonl"));
     let line = serde_json::json!({
@@ -316,6 +320,7 @@ fn write_record(sink: &PathBuf, r: &Record) -> Result<()> {
         "cache_read": r.cache_read,
         "stop_reason": r.stop_reason,
         "latency_ms": r.latency_ms,
+        "agent": agent,
     });
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
     writeln!(f, "{line}")?;

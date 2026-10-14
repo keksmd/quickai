@@ -10,9 +10,16 @@ use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-pub struct ClaudeSource;
+pub struct ClaudeSource {
+    root: PathBuf,
+}
 
 impl ClaudeSource {
+    /// `root` = каталог `projects/` (по умолчанию `~/.claude/projects`).
+    pub fn new(root: Option<PathBuf>) -> Self {
+        ClaudeSource { root: root.unwrap_or_else(|| super::home_join(".claude/projects")) }
+    }
+
     /// slug проекта = имя каталога под projects/.
     fn project_of(path: &Path, root: &Path) -> String {
         path.strip_prefix(root)
@@ -35,8 +42,7 @@ impl DataSource for ClaudeSource {
     }
 
     fn root(&self) -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        PathBuf::from(home).join(".claude/projects")
+        self.root.clone()
     }
 
     fn owns(&self, path: &Path) -> bool {

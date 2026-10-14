@@ -29,9 +29,12 @@ enum Cmd {
         /// Снести и перечитать всё с нуля (в пределах источника)
         #[arg(long)]
         rebuild: bool,
-        /// Источник данных: claude (по умолчанию) | opencode
+        /// Источник данных: claude (по умолчанию) | codex | opencode | hermes | proxy | all
         #[arg(long, default_value = "claude")]
         source: String,
+        /// Каталог данных источника вместо дефолтного (зеркало с VPS, чужой HOME)
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
     },
     /// Сводка по всему индексу
     Stats,
@@ -116,6 +119,9 @@ enum Cmd {
         /// Базовый URL провайдера (куда форвардить)
         #[arg(long, default_value = "https://api.openai.com")]
         upstream: String,
+        /// Тег агента (aider, cline, vps-bot…) — разделяет харнессы на одном прокси
+        #[arg(long)]
+        tag: Option<String>,
     },
     /// Экспорт агрегатов в машинно-читаемый дамп для внешнего сбора
     Export {
@@ -140,17 +146,30 @@ enum ExportFormat {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Index { rebuild, source } => {
-            let src = source::resolve(&source)?;
+        Cmd::Index { rebuild, source, root } => {
+            let names: Vec<&str> = if source == "all" {
+                anyhow::ensure!(root.is_none(), "--root задаётся только для одного источника");
+                source::ALL.to_vec()
+            } else {
+                vec![source.as_str()]
+            };
             let mut conn = index::open_db()?;
-            let s = index::run(&mut conn, rebuild, src.as_ref())?;
-            println!(
-                "индекс готов [{}]: {} файлов просмотрено, {} проиндексировано, +{} turn'ов",
-                src.name(),
-                s.files_scanned,
-                s.files_indexed,
-                s.turns_added
-            );
+            for name in names {
+                let src = source::resolve(name, root.clone())?;
+                if !src.root().exists() {
+                    anyhow::ensure!(source == "all", "нет каталога {}", src.root().display());
+                    println!("пропуск [{name}]: нет {}", src.root().display());
+                    continue;
+                }
+                let s = index::run(&mut conn, rebuild, src.as_ref())?;
+                println!(
+                    "индекс готов [{}]: {} файлов просмотрено, {} проиндексировано, +{} turn'ов",
+                    src.name(),
+                    s.files_scanned,
+                    s.files_indexed,
+                    s.turns_added
+                );
+            }
         }
         Cmd::Stats => {
             let conn = index::open_db()?;
@@ -250,8 +269,8 @@ fn main() -> Result<()> {
         Cmd::Mcp => {
             mcp::serve()?;
         }
-        Cmd::Proxy { port, upstream } => {
-            proxy::serve(port, upstream)?;
+        Cmd::Proxy { port, upstream, tag } => {
+            proxy::serve(port, upstream, tag)?;
         }
         Cmd::Export { project, pretty, format } => {
             let conn = index::open_db()?;

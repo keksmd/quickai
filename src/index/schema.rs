@@ -153,7 +153,7 @@ pub fn init(conn: &Connection) -> Result<()> {
 /// наличию колонки (а не по версии) — устойчиво к любому промежуточному состоянию.
 /// До v2 всё было Claude Code, поэтому `source` доливаем с DEFAULT 'claude' без reindex.
 fn migrate(conn: &Connection) -> Result<()> {
-    for t in ["sessions", "tasks", "agent_runs", "turns", "tool_calls"] {
+    for t in ["sessions", "tasks", "agent_runs", "turns", "tool_calls", "files"] {
         ensure_col(conn, t, "source", "TEXT DEFAULT 'claude'")?;
     }
     ensure_col(conn, "turns", "ext_id", "TEXT")?;

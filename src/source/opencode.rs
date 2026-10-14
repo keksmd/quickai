@@ -21,15 +21,16 @@ pub struct OpenCodeSource {
 }
 
 impl OpenCodeSource {
-    pub fn new() -> Self {
-        let base = std::env::var("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-                PathBuf::from(home).join(".local/share")
-            });
+    /// `root` = каталог `storage/` (по умолчанию `$XDG_DATA_HOME/opencode/storage`).
+    pub fn new(root: Option<PathBuf>) -> Self {
+        let storage = root.unwrap_or_else(|| {
+            std::env::var("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| super::home_join(".local/share"))
+                .join("opencode/storage")
+        });
         OpenCodeSource {
-            storage: base.join("opencode/storage"),
+            storage,
             sessions: RefCell::new(HashMap::new()),
         }
     }
