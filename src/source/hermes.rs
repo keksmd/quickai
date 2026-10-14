@@ -51,6 +51,9 @@ impl DataSource for HermesSource {
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .with_context(|| format!("open {}", path.display()))?;
+        if !has_usage_table(&conn) {
+            return Ok(FileBatch { events: Vec::new(), bytes: size, last_prompt: None });
+        }
         let profile = profile_of(path, &self.root);
         let key = path.to_string_lossy();
         Ok(FileBatch { events: read_usage(&conn, &profile, &key)?, bytes: size, last_prompt: None })
@@ -64,6 +67,17 @@ impl DataSource for HermesSource {
     fn max_depth(&self) -> usize {
         3
     }
+}
+
+/// Любой файл с именем `state.db` попадает в обход каталога; не-Hermes БД (пустые, чужие) пропускаем,
+/// а не роняем весь индекс.
+fn has_usage_table(conn: &Connection) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_model_usage'",
+        [],
+        |_| Ok(()),
+    )
+    .is_ok()
 }
 
 /// Имя профиля по пути БД (`profiles/<имя>/state.db`), корневая БД — "".
