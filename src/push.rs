@@ -51,9 +51,10 @@ pub fn build(conn: &Connection, o: &Opts) -> Result<Value> {
 
     let full: Vec<String> = FULL_HISTORY.iter().map(|s| format!("'{s}'")).collect();
     let mut st = conn.prepare(&format!(
-        "SELECT date(ts/1000,'unixepoch'), source, project, model, COUNT(*), SUM(is_sidechain),
-                SUM(input_tokens), SUM(output_tokens), SUM(cache_read), SUM(cache_write_5m+cache_write_1h),
-                SUM(cost_usd), SUM(stop_reason IN ('error','cancelled'))
+        "SELECT date(ts/1000,'unixepoch'), source, project, model, COUNT(*), COALESCE(SUM(is_sidechain),0),
+                COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read),0),
+                COALESCE(SUM(COALESCE(cache_write_5m,0)+COALESCE(cache_write_1h,0)),0),
+                TOTAL(cost_usd), COALESCE(SUM(stop_reason IN ('error','cancelled')),0)
          FROM turns WHERE ts >= ?1 OR source IN ({}) GROUP BY 1,2,3,4 ORDER BY 1,2,3,4",
         full.join(",")
     ))?;
@@ -77,7 +78,7 @@ pub fn build(conn: &Connection, o: &Opts) -> Result<Value> {
         .collect::<rusqlite::Result<_>>()?;
 
     let mut st = conn.prepare(
-        "SELECT tc.source, tc.name, COUNT(*), SUM(tc.is_error)
+        "SELECT tc.source, tc.name, COUNT(*), COALESCE(SUM(tc.is_error),0)
          FROM tool_calls tc JOIN sessions s ON s.session_id = tc.session_id
          WHERE s.last_ts >= ?1 GROUP BY 1,2 ORDER BY 3 DESC",
     )?;
@@ -93,7 +94,7 @@ pub fn build(conn: &Connection, o: &Opts) -> Result<Value> {
         .collect::<rusqlite::Result<_>>()?;
 
     let mut st = conn.prepare(
-        "SELECT source, agent_type, COUNT(*), SUM(turns), SUM(out_tokens), SUM(cost_usd)
+        "SELECT source, agent_type, COUNT(*), COALESCE(SUM(turns),0), COALESCE(SUM(out_tokens),0), TOTAL(cost_usd)
          FROM agent_runs WHERE last_ts >= ?1 GROUP BY 1,2 ORDER BY 6 DESC",
     )?;
     let agents: Vec<Value> = st
@@ -110,8 +111,8 @@ pub fn build(conn: &Connection, o: &Opts) -> Result<Value> {
         .collect::<rusqlite::Result<_>>()?;
 
     let mut st = conn.prepare(
-        "SELECT prompt_id, source, project, first_ts, wall_ms, cost_usd, out_tokens, total_tokens,
-                agent_count, text
+        "SELECT prompt_id, source, project, COALESCE(first_ts,last_ts), COALESCE(wall_ms,0), COALESCE(cost_usd,0),
+                COALESCE(out_tokens,0), COALESCE(total_tokens,0), COALESCE(agent_count,0), text
          FROM tasks WHERE last_ts >= ?1 ORDER BY cost_usd DESC LIMIT 50",
     )?;
     let tasks: Vec<Value> = st
@@ -180,13 +181,16 @@ mod tests {
              VALUES ('p','s','/w','zcode','GLM-5.3',{now},10,2,100,0,0,0.5,0,'stop'),
                     ('p','s','/w','zcode','GLM-5.3',{now},20,3,0,5,0,0.25,1,'error'),
                     ('q','s','/w','zcode','GLM-5.3',{old},999,999,0,0,0,9.0,0,'stop'),
-                    ('h','s','/w','hermes','GLM-5.3',{old},1,1,0,0,0,1.0,0,'stop');",
+                    ('h','s','/w','hermes','GLM-5.3',{old},1,1,0,0,0,1.0,0,'stop'),
+                    ('r','s','/w','codex','gpt-5',{now},1,1,0,0,0,0.1,0,NULL);",
             old = now - 40 * 86_400_000
         ))
         .unwrap();
         let doc = build(&conn, &Opts { host: "h".into(), days: 7, with_text: false }).unwrap();
         let all = doc["daily"].as_array().unwrap();
-        assert_eq!(all.len(), 2);
+        assert_eq!(all.len(), 3);
+        let c: Vec<&Value> = all.iter().filter(|r| r["source"] == "codex").collect();
+        assert_eq!(c[0]["failed_turns"], 0, "NULL stop_reason group must not abort the push");
         assert!(all.iter().any(|r| r["source"] == "hermes"));
         let d: Vec<&Value> = all.iter().filter(|r| r["source"] == "zcode").collect();
         assert_eq!(d.len(), 1);
