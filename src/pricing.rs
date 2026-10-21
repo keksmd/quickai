@@ -27,9 +27,17 @@ pub fn price_for(model: &str) -> Price {
         m if m.contains("o3") || m.contains("o1") => Price { input_per_mtok: 2.0, output_per_mtok: 8.0 },
         m if m.contains("gpt-4") => Price { input_per_mtok: 2.5, output_per_mtok: 10.0 },
         m if m.contains("gpt") => Price { input_per_mtok: 1.25, output_per_mtok: 10.0 },
+        m if is_glm(m) && m.to_ascii_lowercase().contains("flash") => Price { input_per_mtok: 0.1, output_per_mtok: 0.4 },
+        m if is_glm(m) => Price { input_per_mtok: 1.4, output_per_mtok: 4.4 },
         // Неизвестная модель → не занижаем, считаем по Opus.
         _ => Price { input_per_mtok: 5.0, output_per_mtok: 25.0 },
     }
+}
+
+/// Z.ai GLM (source=zcode/hermes, имена вида `GLM-5.3`). Лист-цены GLM-5.2 на 2026-10;
+/// Flash-тариф — оценка, ПЕРЕПРОВЕРИТЬ.
+fn is_glm(model: &str) -> bool {
+    model.to_ascii_lowercase().contains("glm")
 }
 
 /// Стоимость одного turn'а, $. Кэш считается от input-ставки через множители.
@@ -60,6 +68,13 @@ mod tests {
         let u = Usage { cache_read: 1_000_000, ..Default::default() };
         // 1M cache-read @ 0.1× × $5 = $0.5
         assert!((cost_of("claude-opus-4-8", &u) - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn glm_case_insensitive() {
+        let u = Usage { input: 1_000_000, ..Default::default() };
+        assert!((cost_of("GLM-5.3", &u) - 1.4).abs() < 1e-9);
+        assert!((cost_of("GLM-5.3-Flash", &u) - 0.1).abs() < 1e-9);
     }
 
     #[test]

@@ -10,6 +10,7 @@
 //! - OpenCode — иммутабельные per-message JSON + части в соседних файлах ([`opencode`])
 //! - Codex — append-JSONL rollout'ы, usage на каждый API-вызов ([`codex`])
 //! - Hermes Agent — SQLite `state.db` с агрегатами usage по сессии/модели ([`hermes`])
+//! - ZCode — SQLite `cli/db/db.sqlite`, usage на каждый API-вызов ([`zcode`])
 //! - proxy — нативный JSONL `quickai proxy` для любых OpenAI/Anthropic-совместимых агентов ([`proxy`])
 
 pub mod claude;
@@ -17,6 +18,7 @@ pub mod codex;
 pub mod hermes;
 pub mod opencode;
 pub mod proxy;
+pub mod zcode;
 
 use crate::model::Usage;
 use anyhow::Result;
@@ -97,7 +99,7 @@ pub trait DataSource {
 }
 
 /// Все известные источники — порядок для `index --source all`.
-pub const ALL: &[&str] = &["claude", "codex", "opencode", "hermes", "proxy"];
+pub const ALL: &[&str] = &["claude", "codex", "opencode", "hermes", "zcode", "proxy"];
 
 /// Резолв источника по имени. `root` переопределяет каталог данных (зеркало с VPS,
 /// нестандартный HOME). Новые адаптеры добавляются сюда и в [`ALL`].
@@ -107,6 +109,7 @@ pub fn resolve(name: &str, root: Option<PathBuf>) -> Result<Box<dyn DataSource>>
         "codex" => Ok(Box::new(codex::CodexSource::new(root))),
         "opencode" => Ok(Box::new(opencode::OpenCodeSource::new(root))),
         "hermes" => Ok(Box::new(hermes::HermesSource::new(root))),
+        "zcode" => Ok(Box::new(zcode::ZcodeSource::new(root))),
         "proxy" => Ok(Box::new(proxy::ProxySource::new(root))),
         other => anyhow::bail!("неизвестный источник: {other} (доступно: {}, all)", ALL.join(", ")),
     }

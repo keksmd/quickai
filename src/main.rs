@@ -8,6 +8,7 @@ mod model;
 mod parse;
 mod pricing;
 mod proxy;
+mod push;
 mod query;
 mod report;
 mod source;
@@ -29,7 +30,7 @@ enum Cmd {
         /// Снести и перечитать всё с нуля (в пределах источника)
         #[arg(long)]
         rebuild: bool,
-        /// Источник данных: claude (по умолчанию) | codex | opencode | hermes | proxy | all
+        /// Источник данных: claude (по умолчанию) | codex | opencode | hermes | zcode | proxy | all
         #[arg(long, default_value = "claude")]
         source: String,
         /// Каталог данных источника вместо дефолтного (зеркало с VPS, чужой HOME)
@@ -122,6 +123,30 @@ enum Cmd {
         /// Тег агента (aider, cline, vps-bot…) — разделяет харнессы на одном прокси
         #[arg(long)]
         tag: Option<String>,
+    },
+    /// Отправить дневные агрегаты на удалённый приёмник (agent-sync-hub), контракт quickai.push/v1
+    Push {
+        /// Endpoint приёмника, напр. https://agent-sync-hub.dada-tuda.ru/api/quickai/v1/ingest
+        #[arg(long, env = "QUICKAI_PUSH_URL")]
+        url: Option<String>,
+        /// Bearer-токен приёмника
+        #[arg(long, env = "QUICKAI_PUSH_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+        /// Имя машины в аналитике (по умолчанию `hostname`)
+        #[arg(long, env = "QUICKAI_HOST")]
+        host: Option<String>,
+        /// Окно в UTC-днях (включая сегодня); приёмник заменяет эти дни целиком
+        #[arg(long, default_value_t = 7)]
+        days: u32,
+        /// Отправлять текст промптов в топе задач (по умолчанию — только метаданные)
+        #[arg(long)]
+        with_text: bool,
+        /// Перед отправкой обновить индекс по всем источникам
+        #[arg(long)]
+        index: bool,
+        /// Не отправлять, напечатать документ
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Экспорт агрегатов в машинно-читаемый дамп для внешнего сбора
     Export {
@@ -271,6 +296,32 @@ fn main() -> Result<()> {
         }
         Cmd::Proxy { port, upstream, tag } => {
             proxy::serve(port, upstream, tag)?;
+        }
+        Cmd::Push { url, token, host, days, with_text, index: reindex, dry_run } => {
+            let mut conn = index::open_db()?;
+            if reindex {
+                for name in source::ALL {
+                    let src = source::resolve(name, None)?;
+                    if src.root().exists() {
+                        let s = index::run(&mut conn, false, src.as_ref())?;
+                        eprintln!("индекс [{name}]: +{} turn'ов", s.turns_added);
+                    }
+                }
+            }
+            let opts = push::Opts { host: host.unwrap_or_else(push::default_host), days, with_text };
+            let doc = push::build(&conn, &opts)?;
+            if dry_run {
+                println!("{}", serde_json::to_string_pretty(&doc)?);
+            } else {
+                let url = url.ok_or_else(|| anyhow::anyhow!("нужен --url или QUICKAI_PUSH_URL"))?;
+                let reply = push::send(&url, token.as_deref(), &doc)?;
+                println!(
+                    "отправлено [{}]: {} строк daily, окно {} дн → {reply}",
+                    opts.host,
+                    doc["daily"].as_array().map(|a| a.len()).unwrap_or(0),
+                    days
+                );
+            }
         }
         Cmd::Export { project, pretty, format } => {
             let conn = index::open_db()?;

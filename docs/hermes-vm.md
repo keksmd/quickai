@@ -51,6 +51,15 @@ The MCP server only reads the index; something has to refresh it.
 
 If you use `--root` or `QUICKAI_DB`, put the same flags/env into the cron line.
 
+## 3b. Send daily analytics to the hub
+
+```bash
+QUICKAI_PUSH_TOKEN=... bash install-push-schedule.sh --url https://agent-sync-hub.dada-tuda.ru/api/quickai/v1/ingest --host hermes-vps --at 03:30
+```
+
+On a VM without the repo: `curl -fsSLO https://raw.githubusercontent.com/keksmd/quickai/feat/multi-agent-sources/scripts/install-push-schedule.sh && bash install-push-schedule.sh ...`.
+The job runs `quickai push --index` (re-index + send). Contract and flags: [push.md](push.md).
+
 ## 4. Ask Hermes about its own spend (MCP)
 
 Add to `~/.hermes/config.yaml` (use the absolute path, `which quickai`):

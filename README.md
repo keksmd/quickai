@@ -126,7 +126,8 @@ quickai — index summary
 
 | Command | What it shows |
 |---|---|
-| `quickai index [--rebuild] [--source S] [--root DIR]` | Build / refresh the index (incremental). `S` = `claude` (default) \| `codex` \| `opencode` \| `hermes` \| `proxy` \| `all` |
+| `quickai index [--rebuild] [--source S] [--root DIR]` | Build / refresh the index (incremental). `S` = `claude` (default) \| `codex` \| `opencode` \| `hermes` \| `zcode` \| `proxy` \| `all` |
+| `quickai push [--index] [--days N]` | Send daily aggregates to a remote hub (`quickai.push/v1`, see [docs/push.md](docs/push.md)) |
 | `quickai stats` | Overall summary — tokens, subagents, API-equivalent |
 | `quickai tasks [--by time\|tokens\|cost] [--project X]` | Your prompts, broken down |
 | `quickai usage` | One-screen report in the terminal (pager) |
@@ -177,6 +178,7 @@ filter, so "profile this project" just works. Tools: `quickai_stats`, `quickai_t
   | `codex` | `$CODEX_HOME` or `~/.codex` — `sessions/**/rollout-*.jsonl`, `archived_sessions/` | per API call; sub-agents roll up into the parent task |
   | `opencode` | `$XDG_DATA_HOME/opencode/storage` | per message |
   | `hermes` | `$HERMES_HOME` or `~/.hermes` — `state.db`, `profiles/*/state.db` (read-only) | per session × model (Hermes stores aggregates only); re-read on every index |
+  | `zcode` | `$ZCODE_HOME/cli/db` or `~/.zcode/cli/db` — `db.sqlite` (read-only) | per API call; sub-agent sessions roll up into the parent task |
   | `proxy` | `~/.quickai/proxy/*.jsonl` from `quickai proxy` | per API call — for any other OpenAI/Anthropic-compatible agent (aider, Cline, …) |
 
 - **Agents on a VPS.** Mirror the agent's data dir and point `--root` at it, e.g.
