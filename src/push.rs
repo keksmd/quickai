@@ -117,12 +117,20 @@ pub fn build(conn: &Connection, o: &Opts) -> Result<Value> {
            SELECT prompt_id, ts - LAG(ts) OVER (PARTITION BY prompt_id ORDER BY ts) AS gap
            FROM turns WHERE ts > 0 AND prompt_id IN (SELECT prompt_id FROM t)
          ),
+         gs AS (
+           SELECT prompt_id,
+                  SUM(CASE WHEN gap > 60000 THEN gap ELSE 0 END) AS idle,
+                  SUM(CASE WHEN gap > 60000 AND gap < 1800000 THEN gap ELSE 0 END) AS wait,
+                  SUM(CASE WHEN gap >= 1800000 THEN gap ELSE 0 END) AS away,
+                  MAX(gap) AS max_gap
+           FROM gaps GROUP BY prompt_id
+         ),
          st AS (
            SELECT t.prompt_id, t.cost_usd, t.wall_ms,
                   (SELECT COUNT(*) FROM turns WHERE prompt_id = t.prompt_id) AS n,
-                  COALESCE((SELECT SUM(CASE WHEN gap > 60000 THEN gap ELSE 0 END) FROM gaps WHERE prompt_id = t.prompt_id), 0) AS idle,
-                  COALESCE((SELECT MAX(gap) FROM gaps WHERE prompt_id = t.prompt_id), 0) AS max_gap
-           FROM t
+                  COALESCE(gs.idle, 0) AS idle, COALESCE(gs.wait, 0) AS wait,
+                  COALESCE(gs.away, 0) AS away, COALESCE(gs.max_gap, 0) AS max_gap
+           FROM t LEFT JOIN gs ON gs.prompt_id = t.prompt_id
          ),
          sel AS (
            SELECT prompt_id FROM (SELECT prompt_id FROM st ORDER BY COALESCE(cost_usd,0) DESC, prompt_id LIMIT 50)
@@ -131,7 +139,7 @@ pub fn build(conn: &Connection, o: &Opts) -> Result<Value> {
          )
          SELECT t.prompt_id, t.source, t.project, COALESCE(t.first_ts,t.last_ts), COALESCE(t.wall_ms,0), COALESCE(t.cost_usd,0),
                 COALESCE(t.out_tokens,0), COALESCE(t.total_tokens,0), COALESCE(t.agent_count,0), t.text,
-                st.n, st.idle, st.max_gap
+                st.n, st.idle, st.max_gap, st.wait, st.away
          FROM t JOIN st ON st.prompt_id = t.prompt_id
          WHERE t.prompt_id IN (SELECT prompt_id FROM sel)
          ORDER BY COALESCE(t.cost_usd,0) DESC, t.prompt_id",
@@ -152,13 +160,15 @@ pub fn build(conn: &Connection, o: &Opts) -> Result<Value> {
                 "turns": r.get::<_, i64>(10)?,
                 "idle_ms": r.get::<_, i64>(11)?,
                 "max_gap_ms": r.get::<_, i64>(12)?,
+                "wait_ms": r.get::<_, i64>(13)?,
+                "away_ms": r.get::<_, i64>(14)?,
                 "text": if o.with_text { text } else { None },
             }))
         })?
         .collect::<rusqlite::Result<_>>()?;
 
     let mut st = conn.prepare(
-        "SELECT COALESCE(source,''), COALESCE(model,''), COALESCE(stop_reason,'(null)'), COUNT(*)
+        "SELECT COALESCE(source,''), COALESCE(model,''), substr(COALESCE(stop_reason,'(null)'),1,200), COUNT(*)
          FROM turns WHERE ts >= ?1 GROUP BY 1,2,3 ORDER BY 4 DESC",
     )?;
     let stop_reasons: Vec<Value> = st
@@ -174,8 +184,9 @@ pub fn build(conn: &Connection, o: &Opts) -> Result<Value> {
 
     let mut st = conn.prepare(
         "WITH g AS (
-           SELECT source, model, ts, ts - LAG(ts) OVER (PARTITION BY session_id ORDER BY ts) AS gap
-           FROM turns WHERE ts > 0
+           SELECT source, model, ts,
+                  ts - LAG(ts) OVER (PARTITION BY session_id, COALESCE(agent_run_id,'') ORDER BY ts) AS gap
+           FROM turns WHERE ts >= ?1 - 120000 AND session_id IS NOT NULL
          )
          SELECT COALESCE(source,''), COALESCE(model,''), COUNT(*), CAST(AVG(gap) AS INTEGER)
          FROM g WHERE ts >= ?1 AND gap > 0 AND gap < 120000 GROUP BY 1,2 ORDER BY 3 DESC",
@@ -298,6 +309,7 @@ mod tests {
         assert_eq!(a["turns"], 4);
         assert_eq!(a["idle_ms"], 90_000);
         assert_eq!(a["max_gap_ms"], 90_000);
+        assert_eq!((a["wait_ms"].as_i64(), a["away_ms"].as_i64()), (Some(90_000), Some(0)));
         let zz = tasks.iter().find(|t| t["id"] == "zz").expect("top by wall_ms must be included");
         assert_eq!(zz["turns"], 2);
         assert_eq!(zz["idle_ms"], 200_000);
@@ -325,4 +337,53 @@ mod tests {
         let m3 = lat.iter().find(|r| r["model"] == "m3").unwrap();
         assert_eq!((m3["samples"].as_i64(), m3["avg_gap_ms"].as_i64()), (Some(60), Some(1000)));
     }
+
+    #[test]
+    fn task_waits_split_from_walk_aways() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::index::schema::init(&conn).unwrap();
+        let t0 = chrono::Utc::now().timestamp_millis() - 7_200_000;
+        conn.execute_batch(&format!(
+            "INSERT INTO turns(prompt_id,session_id,project,source,model,ts,stop_reason) VALUES
+                ('w','s','/w','claude','m',{t0},'stop'),
+                ('w','s','/w','claude','m',{t0}+120000,'stop'),
+                ('w','s','/w','claude','m',{t0}+150000,'stop'),
+                ('w','s','/w','claude','m',{t0}+2550000,'stop');
+             INSERT INTO tasks(prompt_id,session_id,project,source,first_ts,last_ts,wall_ms,cost_usd)
+             VALUES ('w','s','/w','claude',{t0},{t0}+2550000,2550000,1.0);"
+        ))
+        .unwrap();
+        let doc = build(&conn, &Opts { host: "h".into(), days: 7, with_text: false }).unwrap();
+        let w = &doc["tasks"][0];
+        assert_eq!(w["idle_ms"], 2_520_000);
+        assert_eq!(w["wait_ms"], 120_000, "1-30 min gaps are waits");
+        assert_eq!(w["away_ms"], 2_400_000, "30 min+ gaps are walk-aways");
+    }
+
+
+    #[test]
+    fn latency_keeps_agent_runs_apart_and_long_reasons_are_cut() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::index::schema::init(&conn).unwrap();
+        let t0 = chrono::Utc::now().timestamp_millis() - 600_000;
+        let long = "x".repeat(300);
+        conn.execute_batch(&format!(
+            "INSERT INTO turns(prompt_id,session_id,agent_run_id,project,source,model,ts,stop_reason) VALUES
+                ('p','s','a1','/w','claude','m',{t0},'stop'),
+                ('p','s','a2','/w','claude','m',{t0}+1000,'stop'),
+                ('p','s','a1','/w','claude','m',{t0}+20000,'stop'),
+                ('p','s','a2','/w','claude','m',{t0}+21000,'{long}'),
+                ('p',NULL,NULL,'/w','claude','m',{t0}+22000,'stop');"
+        ))
+        .unwrap();
+        let doc = build(&conn, &Opts { host: "h".into(), days: 7, with_text: false }).unwrap();
+        let lat = doc["latency"].as_array().unwrap();
+        assert_eq!(lat.len(), 1);
+        assert_eq!(lat[0]["samples"], 2, "one gap per agent run, none across runs or without a session");
+        assert_eq!(lat[0]["avg_gap_ms"], 20_000);
+        let reasons: Vec<&str> = doc["stop_reasons"].as_array().unwrap().iter().map(|r| r["reason"].as_str().unwrap()).collect();
+        assert!(reasons.iter().all(|r| r.chars().count() <= 200));
+        assert!(reasons.contains(&"x".repeat(200).as_str()));
+    }
+
 }

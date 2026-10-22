@@ -54,7 +54,8 @@ Run it on every machine with its own `--host`.
   "agents": [ { "source": "zcode", "agent_type": "Explore", "runs": 7, "turns": 136, "output_tokens": 67636, "cost_usd": 2.13 } ],
   "tasks":  [ { "id": "turn_8eeb...", "source": "zcode", "project": "/Users/alex/x", "day": "2026-10-20",
                 "wall_ms": 498254, "cost_usd": 3.1, "output_tokens": 6681, "total_tokens": 4285787,
-                "agent_count": 0, "turns": 126, "idle_ms": 301000, "max_gap_ms": 184000, "text": null } ],
+                "agent_count": 0, "turns": 126, "idle_ms": 301000, "max_gap_ms": 184000,
+                "wait_ms": 301000, "away_ms": 0, "text": null } ],
   "stop_reasons": [ { "source": "zcode", "model": "GLM-5.3", "reason": "stop", "turns": 389 },
                     { "source": "zcode", "model": "GLM-5.3", "reason": "(null)", "turns": 20 } ],
   "latency": [ { "source": "zcode", "model": "GLM-5.3", "samples": 380, "avg_gap_ms": 8120 } ]
@@ -87,12 +88,15 @@ Semantics the receiver must follow:
   `turns` among tasks active in the window; `text` is `null` unless `--with-text`.
   `turns` = number of turns of the task; `idle_ms` = sum of gaps between consecutive turns of
   the task that are longer than 60 s (the harness was waiting); `max_gap_ms` = the largest
-  single gap.
+  single gap. `idle_ms` splits into `wait_ms` (gaps of 60 s to 30 min: permission prompts,
+  questions, slow tools) and `away_ms` (gaps of 30 min and more: the session was left open).
 - `stop_reasons` = turns with `ts` in the window grouped by `source`, `model`,
-  `reason` (a missing stop reason is `"(null)"`); `model` is `""` when unknown. Snapshot of the
+  `reason` (a missing stop reason is `"(null)"`, longer ones are cut to 200 characters);
+  `model` is `""` when unknown. Snapshot of the
   window: do not add to `daily` sums.
-- `latency` = gaps between consecutive turns of the same session (turn timestamps in the
-  window) per `source` x `model`; only gaps with 0 < gap < 120000 ms are counted (longer ones
+- `latency` = gaps between consecutive turns of the same session and the same agent run (so
+  parallel sub-agents do not shorten each other's gaps; turn timestamps in the window) per
+  `source` x `model`; only gaps with 0 < gap < 120000 ms are counted (longer ones
   are user idle, not model time). `avg_gap_ms` is an integer, `samples` the number of gaps.
 - Additive fields may appear in `v1`; a breaking change bumps `schema`.
 
