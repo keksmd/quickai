@@ -40,6 +40,7 @@ Run it on every machine with its own `--host`.
 {
   "schema": "quickai.push/v1",
   "host": "macbook",
+  "instance": "",
   "quickai_version": "0.4.0",
   "generated_at": "2026-10-21T09:00:03.120Z",
   "window": { "since_day": "2026-10-15", "until_day": "2026-10-21", "days": 7 },
@@ -64,16 +65,22 @@ Run it on every machine with its own `--host`.
 
 Semantics the receiver must follow:
 
-- **Idempotent replace.** For a `host`, rows of `daily` for every day in
-  `[window.since_day, window.until_day]` replace what was stored for that host and day
+- **Idempotent replace.** For a `(host, instance)`, rows of `daily` for every day in
+  `[window.since_day, window.until_day]` replace what was stored for that host, instance and day
   (delete + insert in one transaction). Days outside the window are never touched —
   **except** for sources listed in `full_history_sources`: their `daily` rows are sent for the
-  whole history, and the receiver replaces ALL stored rows of that `(host, source)`.
-  `tools`, `agents`, `tasks`, `stop_reasons`, `latency` are snapshots: replace the host's
-  previous snapshot.
+  whole history, and the receiver replaces ALL stored rows of that `(host, instance, source)`.
+  `tools`, `agents`, `tasks`, `stop_reasons`, `latency` are snapshots: replace the
+  `(host, instance)` previous snapshot.
   Re-sending must never double anything.
-- **`source`** = harness: `claude`, `codex`, `opencode`, `hermes`, `zcode`, `proxy`
-  (for `proxy`, `project` holds the `--tag` of the agent). Unknown values must be accepted.
+- **`instance`** (optional, default `""`): one producer inside a host whose local history does
+  not survive a restart, e.g. the pod of an agent (`--instance` / `QUICKAI_INSTANCE`). A new pod
+  pushes a new instance, so it never overwrites what the previous pod already sent; the receiver
+  sums a day across the instances of a host and ages out snapshots of instances that stopped
+  pushing. A laptop or VPS leaves it empty.
+- **`source`** = harness: `claude`, `codex`, `opencode`, `hermes`, `zcode`, `proxy`, `kagent`
+  (for `proxy`, `project` holds the `--tag` of the agent; for `kagent`, the agent name).
+  Unknown values must be accepted.
 - **Tokens.** `input_tokens` is uncached input; `cache_read_tokens` / `cache_write_tokens`
   are separate; `output_tokens` includes reasoning. Total = sum of the four.
 - **`cost_usd`** is an API-list-price equivalent (subscriptions included), not a bill.
@@ -101,3 +108,23 @@ Semantics the receiver must follow:
 - Additive fields may appear in `v1`; a breaking change bumps `schema`.
 
 Expected response: `2xx` with any JSON body (e.g. `{"accepted": true, "rows": 42}`).
+
+## Agent pods (`kagent`)
+
+A Dada Cloud kagent agent is its own producer: the runtime appends every non-partial ADK event
+to `$HOME/.quickai/kagent/<UTC day>.jsonl` and runs
+`quickai push --index --days 2` on a timer with `QUICKAI_HOST=<agent>` and
+`QUICKAI_INSTANCE=<pod name>`. One line:
+
+```json
+{"id": "<event id>", "session_id": "<A2A context id>", "user_id": "<caller>",
+ "agent_id": "kagent__NS__tg_exchange_support", "model": "glm-5.3-flash", "created_at_ms": 1792666389750,
+ "data": {"author": "tg_exchange_support", "invocation_id": "e-...", "timestamp": 1792666389.75,
+          "finish_reason": "STOP", "error_code": null,
+          "usage_metadata": {"prompt_token_count": 70694, "candidates_token_count": 45,
+                             "cached_content_token_count": null, "thoughts_token_count": null},
+          "content": {"parts": [{"function_call": {"id": "c1", "name": "kb_search"}},
+                                {"function_response": {"id": "c0", "response": {"isError": false}}}]}}}
+```
+
+`data` keeps the ADK `Event` field names (`model_dump(mode="json")`); message text is not needed.
