@@ -12,10 +12,12 @@
 //! - Hermes Agent — SQLite `state.db` с агрегатами usage по сессии/модели ([`hermes`])
 //! - ZCode — SQLite `cli/db/db.sqlite`, usage на каждый API-вызов ([`zcode`])
 //! - proxy — нативный JSONL `quickai proxy` для любых OpenAI/Anthropic-совместимых агентов ([`proxy`])
+//! - kagent — ADK-события агентов Dada Cloud, которые пишет сам под агента ([`kagent`])
 
 pub mod claude;
 pub mod codex;
 pub mod hermes;
+pub mod kagent;
 pub mod opencode;
 pub mod proxy;
 pub mod zcode;
@@ -99,7 +101,7 @@ pub trait DataSource {
 }
 
 /// Все известные источники — порядок для `index --source all`.
-pub const ALL: &[&str] = &["claude", "codex", "opencode", "hermes", "zcode", "proxy"];
+pub const ALL: &[&str] = &["claude", "codex", "opencode", "hermes", "zcode", "proxy", "kagent"];
 
 /// Резолв источника по имени. `root` переопределяет каталог данных (зеркало с VPS,
 /// нестандартный HOME). Новые адаптеры добавляются сюда и в [`ALL`].
@@ -111,6 +113,7 @@ pub fn resolve(name: &str, root: Option<PathBuf>) -> Result<Box<dyn DataSource>>
         "hermes" => Ok(Box::new(hermes::HermesSource::new(root))),
         "zcode" => Ok(Box::new(zcode::ZcodeSource::new(root))),
         "proxy" => Ok(Box::new(proxy::ProxySource::new(root))),
+        "kagent" => Ok(Box::new(kagent::KagentSource::new(root))),
         other => anyhow::bail!("неизвестный источник: {other} (доступно: {}, all)", ALL.join(", ")),
     }
 }

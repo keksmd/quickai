@@ -21,6 +21,10 @@ pub const FULL_HISTORY: &[&str] = &["hermes"];
 
 pub struct Opts {
     pub host: String,
+    /// Экземпляр производителя внутри хоста (имя пода): эфемерный под теряет локальную
+    /// историю при рестарте, поэтому приёмник заменяет строки в рамках `(host, instance)`,
+    /// а дни суммирует по экземплярам. Пусто = вся машина одна.
+    pub instance: String,
     pub days: u32,
     pub with_text: bool,
 }
@@ -205,6 +209,7 @@ pub fn build(conn: &Connection, o: &Opts) -> Result<Value> {
     Ok(json!({
         "schema": SCHEMA,
         "host": o.host,
+        "instance": o.instance,
         "quickai_version": env!("CARGO_PKG_VERSION"),
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "window": { "since_day": day_of(since), "until_day": day_of(chrono::Utc::now().timestamp_millis()), "days": o.days },
@@ -257,7 +262,7 @@ mod tests {
             old = now - 40 * 86_400_000
         ))
         .unwrap();
-        let doc = build(&conn, &Opts { host: "h".into(), days: 7, with_text: false }).unwrap();
+        let doc = build(&conn, &Opts { host: "h".into(), instance: String::new(), days: 7, with_text: false }).unwrap();
         let all = doc["daily"].as_array().unwrap();
         assert_eq!(all.len(), 3);
         let c: Vec<&Value> = all.iter().filter(|r| r["source"] == "codex").collect();
@@ -272,6 +277,7 @@ mod tests {
         assert_eq!(d[0]["failed_turns"], 1);
         assert!((d[0]["cost_usd"].as_f64().unwrap() - 0.75).abs() < 1e-9);
         assert_eq!(doc["schema"], SCHEMA);
+        assert_eq!(doc["instance"], "", "a whole machine is one instance");
     }
 
     #[test]
@@ -301,7 +307,7 @@ mod tests {
             old = t0 - 40 * 86_400_000
         ))
         .unwrap();
-        let doc = build(&conn, &Opts { host: "h".into(), days: 7, with_text: false }).unwrap();
+        let doc = build(&conn, &Opts { host: "h".into(), instance: String::new(), days: 7, with_text: false }).unwrap();
 
         let tasks = doc["tasks"].as_array().unwrap();
         assert_eq!(tasks.len(), 51, "50 by cost (a + 49 fillers) + zz by wall_ms only");
@@ -353,7 +359,7 @@ mod tests {
              VALUES ('w','s','/w','claude',{t0},{t0}+2550000,2550000,1.0);"
         ))
         .unwrap();
-        let doc = build(&conn, &Opts { host: "h".into(), days: 7, with_text: false }).unwrap();
+        let doc = build(&conn, &Opts { host: "h".into(), instance: String::new(), days: 7, with_text: false }).unwrap();
         let w = &doc["tasks"][0];
         assert_eq!(w["idle_ms"], 2_520_000);
         assert_eq!(w["wait_ms"], 120_000, "1-30 min gaps are waits");
@@ -376,7 +382,7 @@ mod tests {
                 ('p',NULL,NULL,'/w','claude','m',{t0}+22000,'stop');"
         ))
         .unwrap();
-        let doc = build(&conn, &Opts { host: "h".into(), days: 7, with_text: false }).unwrap();
+        let doc = build(&conn, &Opts { host: "h".into(), instance: String::new(), days: 7, with_text: false }).unwrap();
         let lat = doc["latency"].as_array().unwrap();
         assert_eq!(lat.len(), 1);
         assert_eq!(lat[0]["samples"], 2, "one gap per agent run, none across runs or without a session");

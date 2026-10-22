@@ -135,6 +135,10 @@ enum Cmd {
         /// Имя машины в аналитике (по умолчанию `hostname`)
         #[arg(long, env = "QUICKAI_HOST")]
         host: Option<String>,
+        /// Экземпляр внутри хоста (напр. имя пода агента) — приёмник заменяет строки в рамках
+        /// (host, instance), поэтому рестарт эфемерного пода не затирает уже отправленное
+        #[arg(long, env = "QUICKAI_INSTANCE", default_value = "")]
+        instance: String,
         /// Окно в UTC-днях (включая сегодня); приёмник заменяет эти дни целиком
         #[arg(long, default_value_t = 7)]
         days: u32,
@@ -297,7 +301,7 @@ fn main() -> Result<()> {
         Cmd::Proxy { port, upstream, tag } => {
             proxy::serve(port, upstream, tag)?;
         }
-        Cmd::Push { url, token, host, days, with_text, index: reindex, dry_run } => {
+        Cmd::Push { url, token, host, instance, days, with_text, index: reindex, dry_run } => {
             let mut conn = index::open_db()?;
             if reindex {
                 for name in source::ALL {
@@ -308,7 +312,7 @@ fn main() -> Result<()> {
                     }
                 }
             }
-            let opts = push::Opts { host: host.unwrap_or_else(push::default_host), days, with_text };
+            let opts = push::Opts { host: host.unwrap_or_else(push::default_host), instance, days, with_text };
             let doc = push::build(&conn, &opts)?;
             if dry_run {
                 println!("{}", serde_json::to_string_pretty(&doc)?);
