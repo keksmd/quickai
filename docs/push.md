@@ -54,7 +54,10 @@ Run it on every machine with its own `--host`.
   "agents": [ { "source": "zcode", "agent_type": "Explore", "runs": 7, "turns": 136, "output_tokens": 67636, "cost_usd": 2.13 } ],
   "tasks":  [ { "id": "turn_8eeb...", "source": "zcode", "project": "/Users/alex/x", "day": "2026-10-20",
                 "wall_ms": 498254, "cost_usd": 3.1, "output_tokens": 6681, "total_tokens": 4285787,
-                "agent_count": 0, "text": null } ]
+                "agent_count": 0, "turns": 126, "idle_ms": 301000, "max_gap_ms": 184000, "text": null } ],
+  "stop_reasons": [ { "source": "zcode", "model": "GLM-5.3", "reason": "stop", "turns": 389 },
+                    { "source": "zcode", "model": "GLM-5.3", "reason": "(null)", "turns": 20 } ],
+  "latency": [ { "source": "zcode", "model": "GLM-5.3", "samples": 380, "avg_gap_ms": 8120 } ]
 }
 ```
 
@@ -65,7 +68,8 @@ Semantics the receiver must follow:
   (delete + insert in one transaction). Days outside the window are never touched —
   **except** for sources listed in `full_history_sources`: their `daily` rows are sent for the
   whole history, and the receiver replaces ALL stored rows of that `(host, source)`.
-  `tools`, `agents`, `tasks` are snapshots: replace the host's previous snapshot.
+  `tools`, `agents`, `tasks`, `stop_reasons`, `latency` are snapshots: replace the host's
+  previous snapshot.
   Re-sending must never double anything.
 - **`source`** = harness: `claude`, `codex`, `opencode`, `hermes`, `zcode`, `proxy`
   (for `proxy`, `project` holds the `--tag` of the agent). Unknown values must be accepted.
@@ -79,7 +83,17 @@ Semantics the receiver must follow:
 - **Snapshot scope.** `tools` = all-time tool calls of sessions active in the window (tool
   calls carry no timestamp); `agents` / `tasks` = runs / tasks whose last activity is in the
   window, with their full totals. Do not add them to `daily` sums.
-- `tasks` is the top 50 by cost in the window; `text` is `null` unless `--with-text`.
+- `tasks` is the de-duplicated union of the top 50 by cost, top 20 by `wall_ms` and top 20 by
+  `turns` among tasks active in the window; `text` is `null` unless `--with-text`.
+  `turns` = number of turns of the task; `idle_ms` = sum of gaps between consecutive turns of
+  the task that are longer than 60 s (the harness was waiting); `max_gap_ms` = the largest
+  single gap.
+- `stop_reasons` = turns with `ts` in the window grouped by `source`, `model`,
+  `reason` (a missing stop reason is `"(null)"`); `model` is `""` when unknown. Snapshot of the
+  window: do not add to `daily` sums.
+- `latency` = gaps between consecutive turns of the same session (turn timestamps in the
+  window) per `source` x `model`; only gaps with 0 < gap < 120000 ms are counted (longer ones
+  are user idle, not model time). `avg_gap_ms` is an integer, `samples` the number of gaps.
 - Additive fields may appear in `v1`; a breaking change bumps `schema`.
 
 Expected response: `2xx` with any JSON body (e.g. `{"accepted": true, "rows": 42}`).
