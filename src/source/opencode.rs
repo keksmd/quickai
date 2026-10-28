@@ -177,6 +177,7 @@ impl DataSource for OpenCodeSource {
                     cost: msg.get("cost").and_then(|x| x.as_f64()),
                     stop_reason: msg.get("finish").and_then(|x| x.as_str()).map(|s| s.to_string()),
                     tool_uses,
+                    skills: Vec::new(),
                     cwd,
                     git_branch: String::new(),
                     version,

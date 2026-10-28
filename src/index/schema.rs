@@ -157,6 +157,8 @@ fn migrate(conn: &Connection) -> Result<()> {
         ensure_col(conn, t, "source", "TEXT DEFAULT 'claude'")?;
     }
     ensure_col(conn, "turns", "ext_id", "TEXT")?;
+    ensure_col(conn, "tool_calls", "skill", "TEXT")?;
+    ensure_col(conn, "tool_calls", "ts", "INTEGER")?;
     Ok(())
 }
 

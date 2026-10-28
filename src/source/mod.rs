@@ -45,6 +45,8 @@ pub struct TurnData {
     pub stop_reason: Option<String>,
     /// tool_use блоки этого turn'а: (tool_use_id, name).
     pub tool_uses: Vec<(String, String)>,
+    /// Вызовы скиллов этого turn'а: (tool_use_id, имя скилла) — tool_use `Skill` Claude Code.
+    pub skills: Vec<(String, String)>,
     // Контекст сессии.
     pub cwd: String,
     pub git_branch: String,

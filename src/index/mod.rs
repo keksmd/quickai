@@ -189,10 +189,11 @@ fn apply_events(conn: &Connection, src: &str, events: &[Event]) -> Result<u64> {
                 turns += 1;
 
                 for (tuid, name) in &t.tool_uses {
+                    let skill = t.skills.iter().find(|(id, _)| id == tuid).map(|(_, s)| s.as_str());
                     conn.execute(
-                        "INSERT OR IGNORE INTO tool_calls(tool_use_id,name,project,source,session_id,agent_run_id)
-                         VALUES(?1,?2,?3,?4,?5,?6)",
-                        rusqlite::params![tuid, name, t.project, src, t.session_id, t.agent_run_id],
+                        "INSERT OR IGNORE INTO tool_calls(tool_use_id,name,project,source,session_id,agent_run_id,skill,ts)
+                         VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+                        rusqlite::params![tuid, name, t.project, src, t.session_id, t.agent_run_id, skill, t.ts],
                     )?;
                 }
 

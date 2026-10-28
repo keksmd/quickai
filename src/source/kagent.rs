@@ -182,6 +182,7 @@ fn events_of(line: &Value, linked: &mut HashSet<String>, out: &mut Vec<Event>) {
         cost: None,
         stop_reason: stop_reason(data),
         tool_uses,
+        skills: Vec::new(),
         cwd: String::new(),
         git_branch: String::new(),
         version: String::new(),

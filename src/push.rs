@@ -3,7 +3,7 @@
 //!
 //! Контракт `quickai.push/v1` (см. `docs/push.md`): документ — снимок окна последних
 //! `days` UTC-дней хоста. Приёмник для `(host, day)` из окна ЗАМЕНЯЕТ строки `daily`,
-//! а `tools`/`agents`/`tasks`/`stop_reasons`/`latency` — снимок окна целиком, тоже заменяется
+//! а `tools`/`agents`/`tasks`/`stop_reasons`/`latency`/`skills` — снимок окна целиком, тоже заменяется
 //! по `host`. Поэтому повторная отправка идемпотентна, а пересчитанные снимки (Hermes, ZCode)
 //! не задваиваются.
 //! Текст промптов уходит только с `--with-text`.
@@ -206,6 +206,25 @@ pub fn build(conn: &Connection, o: &Opts) -> Result<Value> {
         })?
         .collect::<rusqlite::Result<_>>()?;
 
+    let mut st = conn.prepare(
+        "SELECT date(ts/1000,'unixepoch'), COALESCE(source,''), COALESCE(project,''), skill, COUNT(*),
+                COALESCE(SUM(is_error),0), COUNT(DISTINCT session_id)
+         FROM tool_calls WHERE skill IS NOT NULL AND ts >= ?1 GROUP BY 1,2,3,4 ORDER BY 1,5 DESC",
+    )?;
+    let skills: Vec<Value> = st
+        .query_map([since], |r| {
+            Ok(json!({
+                "day": r.get::<_, String>(0)?,
+                "source": r.get::<_, String>(1)?,
+                "project": r.get::<_, String>(2)?,
+                "skill": r.get::<_, String>(3)?,
+                "calls": r.get::<_, i64>(4)?,
+                "errors": r.get::<_, i64>(5)?,
+                "sessions": r.get::<_, i64>(6)?,
+            }))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+
     Ok(json!({
         "schema": SCHEMA,
         "host": o.host,
@@ -220,6 +239,7 @@ pub fn build(conn: &Connection, o: &Opts) -> Result<Value> {
         "tasks": tasks,
         "stop_reasons": stop_reasons,
         "latency": latency,
+        "skills": skills,
     }))
 }
 
@@ -278,6 +298,31 @@ mod tests {
         assert!((d[0]["cost_usd"].as_f64().unwrap() - 0.75).abs() < 1e-9);
         assert_eq!(doc["schema"], SCHEMA);
         assert_eq!(doc["instance"], "", "a whole machine is one instance");
+    }
+
+    #[test]
+    fn skills_by_day_from_skill_tool_calls() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::index::schema::init(&conn).unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        conn.execute_batch(&format!(
+            "INSERT INTO tool_calls(tool_use_id,name,project,source,session_id,skill,ts,is_error) VALUES
+               ('a','Skill','/w','claude','s1','debtor-letter',{now},0),
+               ('b','Skill','/w','claude','s2','debtor-letter',{now},1),
+               ('c','Skill','/w','claude','s1','caveman:caveman',{now},0),
+               ('d','Bash','/w','claude','s1',NULL,{now},0),
+               ('e','Skill','/w','claude','s1','debtor-letter',{old},0),
+               ('f','Skill','/w','claude','s1',NULL,NULL,0);",
+            old = now - 40 * 86_400_000
+        ))
+        .unwrap();
+        let doc = build(&conn, &Opts { host: "h".into(), instance: String::new(), days: 7, with_text: false }).unwrap();
+        let skills = doc["skills"].as_array().unwrap();
+        assert_eq!(skills.len(), 2);
+        let letter = skills.iter().find(|r| r["skill"] == "debtor-letter").unwrap();
+        assert_eq!((letter["calls"].as_i64(), letter["errors"].as_i64(), letter["sessions"].as_i64()), (Some(2), Some(1), Some(2)));
+        assert_eq!(letter["project"], "/w");
+        assert!(skills.iter().any(|r| r["skill"] == "caveman:caveman"));
     }
 
     #[test]
