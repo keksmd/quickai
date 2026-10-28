@@ -112,6 +112,7 @@ impl DataSource for ClaudeSource {
                                 .as_ref()
                                 .map(parse::tool_uses)
                                 .unwrap_or_default();
+                            let skills = msg.content.as_ref().map(parse::skill_calls).unwrap_or_default();
                             events.push(Event::Turn(TurnData {
                                 prompt_id: last_prompt.clone(), // протяжка текущего promptId
                                 project: project.clone(),
@@ -125,6 +126,7 @@ impl DataSource for ClaudeSource {
                                 cost: None, // считаем по прайсингу
                                 stop_reason: msg.stop_reason.clone(),
                                 tool_uses,
+                                skills,
                                 cwd: rec.cwd.clone().unwrap_or_default(),
                                 git_branch: rec.git_branch.clone().unwrap_or_default(),
                                 version: rec.version.clone().unwrap_or_default(),

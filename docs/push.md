@@ -59,7 +59,9 @@ Run it on every machine with its own `--host`.
                 "wait_ms": 301000, "away_ms": 0, "text": null } ],
   "stop_reasons": [ { "source": "zcode", "model": "GLM-5.3", "reason": "stop", "turns": 389 },
                     { "source": "zcode", "model": "GLM-5.3", "reason": "(null)", "turns": 20 } ],
-  "latency": [ { "source": "zcode", "model": "GLM-5.3", "samples": 380, "avg_gap_ms": 8120 } ]
+  "latency": [ { "source": "zcode", "model": "GLM-5.3", "samples": 380, "avg_gap_ms": 8120 } ],
+  "skills": [ { "day": "2026-10-20", "source": "claude", "project": "/Users/alex/x", "skill": "debtor-letter",
+                "calls": 3, "errors": 0, "sessions": 2 } ]
 }
 ```
 
@@ -70,7 +72,7 @@ Semantics the receiver must follow:
   (delete + insert in one transaction). Days outside the window are never touched —
   **except** for sources listed in `full_history_sources`: their `daily` rows are sent for the
   whole history, and the receiver replaces ALL stored rows of that `(host, instance, source)`.
-  `tools`, `agents`, `tasks`, `stop_reasons`, `latency` are snapshots: replace the
+  `tools`, `agents`, `tasks`, `stop_reasons`, `latency`, `skills` are snapshots: replace the
   `(host, instance)` previous snapshot.
   Re-sending must never double anything.
 - **`instance`** (optional, default `""`): one producer inside a host whose local history does
@@ -91,6 +93,10 @@ Semantics the receiver must follow:
 - **Snapshot scope.** `tools` = all-time tool calls of sessions active in the window (tool
   calls carry no timestamp); `agents` / `tasks` = runs / tasks whose last activity is in the
   window, with their full totals. Do not add them to `daily` sums.
+- `skills` (optional, additive) = skill invocations with `ts` in the window by UTC day,
+  `source`, `project` and `skill`: the `Skill` tool of Claude Code with its `input.skill`
+  (a plugin skill keeps its `plugin:skill` form). Calls indexed before quickai 0.5.0 recorded
+  no skill name; `quickai index --rebuild` fills them in.
 - `tasks` is the de-duplicated union of the top 50 by cost, top 20 by `wall_ms` and top 20 by
   `turns` among tasks active in the window; `text` is `null` unless `--with-text`.
   `turns` = number of turns of the task; `idle_ms` = sum of gaps between consecutive turns of

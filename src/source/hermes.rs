@@ -148,6 +148,7 @@ fn read_usage(conn: &Connection, profile: &str, key: &str) -> Result<Vec<Event>>
             cost,
             stop_reason: r.get(18)?,
             tool_uses: Vec::new(),
+            skills: Vec::new(),
             cwd: cwd.unwrap_or_default(),
             git_branch: r.get::<_, Option<String>>(15)?.unwrap_or_default(),
             version: String::new(),

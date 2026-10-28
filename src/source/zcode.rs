@@ -212,6 +212,7 @@ fn read_db(conn: &Connection, key: &str) -> Result<Vec<Event>> {
             cost: None,
             stop_reason,
             tool_uses: tool_list.iter().map(|(id, name, _)| (id.clone(), name.clone())).collect(),
+            skills: Vec::new(),
             cwd: c.dir,
             git_branch: String::new(),
             version: c.version,

@@ -231,6 +231,7 @@ fn turn(
         cost: None,
         stop_reason: None,
         tool_uses: std::mem::take(tool_uses),
+        skills: Vec::new(),
         cwd: m.map(|m| m.cwd.clone()).unwrap_or_default(),
         git_branch: String::new(),
         version: m.map(|m| m.version.clone()).unwrap_or_default(),

@@ -54,6 +54,29 @@ pub fn tool_uses(content: &serde_json::Value) -> Vec<(String, String)> {
     out
 }
 
+/// Вызовы скиллов из assistant-content: tool_use `Skill` с `input.skill` → (tool_use_id, skill).
+/// Плагинный скилл приходит как `plugin:skill` — имя сохраняется как есть.
+pub fn skill_calls(content: &serde_json::Value) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let serde_json::Value::Array(blocks) = content {
+        for b in blocks {
+            if b.get("type").and_then(|t| t.as_str()) != Some("tool_use")
+                || b.get("name").and_then(|t| t.as_str()) != Some("Skill")
+            {
+                continue;
+            }
+            let id = b.get("id").and_then(|v| v.as_str());
+            let skill = b.pointer("/input/skill").and_then(|v| v.as_str()).map(str::trim);
+            if let (Some(id), Some(skill)) = (id, skill) {
+                if !skill.is_empty() {
+                    out.push((id.to_string(), skill.chars().take(200).collect()));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// tool_result блоки из user-content: (tool_use_id, is_error).
 pub fn tool_results(content: &serde_json::Value) -> Vec<(String, bool)> {
     let mut out = Vec::new();
@@ -82,5 +105,26 @@ pub fn user_text(content: &serde_json::Value) -> Option<String> {
             }
         }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn skill_calls_take_the_skill_input_of_skill_tool_uses() {
+        let content = json!([
+            {"type": "text", "text": "x"},
+            {"type": "tool_use", "id": "t1", "name": "Skill", "input": {"skill": " debtor-letter ", "args": "a"}},
+            {"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "ls"}},
+            {"type": "tool_use", "id": "t3", "name": "Skill", "input": {}},
+            {"type": "tool_use", "id": "t4", "name": "Skill", "input": {"skill": "caveman:caveman"}}
+        ]);
+        assert_eq!(
+            skill_calls(&content),
+            vec![("t1".to_string(), "debtor-letter".to_string()), ("t4".to_string(), "caveman:caveman".to_string())]
+        );
     }
 }

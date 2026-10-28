@@ -87,6 +87,7 @@ fn turn_of(v: &Value) -> TurnData {
         cost: None,
         stop_reason: s("stop_reason"),
         tool_uses: Vec::new(),
+        skills: Vec::new(),
         cwd: String::new(),
         git_branch: String::new(),
         version: String::new(),
